@@ -1,0 +1,18 @@
+{
+	"schemaVersion": 1,
+	"id": "chattextselect",
+	"version": "${version}",
+	"name": "Chat Copy",
+	"description": "Allows drag-selecting text from the Minecraft chat history and copying it with Ctrl+C",
+	"authors": [
+		"xpncvr"
+	],
+	"license": "GPL-3.0",
+	"mixins": [
+		"chattextselect.mixins.json"
+	],
+	"depends": {
+		"minecraft": "~26.1",
+		"java": ">=21"
+	}
+}
