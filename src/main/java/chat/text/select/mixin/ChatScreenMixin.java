@@ -1,15 +1,15 @@
 package chat.text.select.mixin;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.ChatComponent;
-import net.minecraft.client.gui.screens.ChatScreen;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.KeyEvent;
-import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.client.multiplayer.chat.GuiMessage;
-import net.minecraft.util.ARGB;
-import net.minecraft.util.Mth;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.Click;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.hud.ChatHud;
+import net.minecraft.client.gui.hud.ChatHudLine;
+import net.minecraft.client.gui.screen.ChatScreen;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.input.KeyInput;
+import net.minecraft.text.Text;
+import net.minecraft.util.math.MathHelper;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -25,58 +25,44 @@ import java.util.SequencedSet;
 @Mixin(ChatScreen.class)
 public abstract class ChatScreenMixin extends Screen {
 
-    protected ChatScreenMixin() { super(null); }
+    protected ChatScreenMixin() { super(Text.empty()); }
 
-    
     @Unique private int chatSelect$startIdx = -1;
-    
     @Unique private int chatSelect$endIdx = -1;
-    
     @Unique private boolean chatSelect$dragging = false;
 
-    
-    
-    
-
-    
     @Unique
-    private int chatSelect$screenYToTrimmedIndex(double screenY) {
-        Minecraft mc = Minecraft.getInstance();
-        double scale = mc.options.chatScale().get();
-        double spacing = mc.options.chatLineSpacing().get();
+    private int chatSelect$screenYToVisibleIndex(double screenY) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        double scale = (Double) mc.options.getChatScale().getValue();
+        double spacing = (Double) mc.options.getChatLineSpacing().getValue();
         int entryHeight = (int) (9.0 * (spacing + 1.0));
-        int screenHeight = mc.getWindow().getGuiScaledHeight();
-        int chatBottomLocal = Mth.floor((screenHeight - 40) / (float) scale);
+        int screenHeight = mc.getWindow().getScaledHeight();
+        int chatBottomLocal = MathHelper.floor((screenHeight - 40) / (float) scale);
         double localY = screenY / scale;
         int displayIdx = (int) Math.floor((chatBottomLocal - localY) / entryHeight);
-        int scroll = ((ChatComponentAccessor) mc.gui.getChat()).chattextselect$getChatScrollbarPos();
+        int scroll = ((ChatHudAccessor) mc.inGameHud.getChatHud()).chattextselect$getScrolledLines();
         return displayIdx + scroll;
     }
 
-    
     @Unique
     private boolean chatSelect$isInChatHistory(double screenX, double screenY) {
-        Minecraft mc = Minecraft.getInstance();
-        int screenHeight = mc.getWindow().getGuiScaledHeight();
+        MinecraftClient mc = MinecraftClient.getInstance();
+        int screenHeight = mc.getWindow().getScaledHeight();
         if (screenY >= screenHeight - 40) return false;
-        double scale = mc.options.chatScale().get();
-        int chatWidthScreen = (int) (ChatComponent.getWidth((Double) mc.options.chatWidth().get()) * scale);
+        double scale = (Double) mc.options.getChatScale().getValue();
+        int chatWidthScreen = (int) (ChatHud.getWidth((Double) mc.options.getChatWidth().getValue()) * scale);
         return screenX >= 0 && screenX <= chatWidthScreen + 8;
     }
 
-    
-    
-    
-
     @Inject(method = "mouseClicked", at = @At("HEAD"))
-    private void chatSelect$onMouseClicked(MouseButtonEvent event, boolean doubleClick,
-                                           CallbackInfoReturnable<Boolean> cir) {
-        if (event.button() != 0) return;
+    private void chatSelect$onMouseClicked(Click click, boolean doubled, CallbackInfoReturnable<Boolean> cir) {
+        if (click.button() != 0) return;
 
-        if (chatSelect$isInChatHistory(event.x(), event.y())) {
-            List<GuiMessage.Line> lines = ((ChatComponentAccessor) Minecraft.getInstance().gui.getChat())
-                    .chattextselect$getTrimmedMessages();
-            int idx = chatSelect$screenYToTrimmedIndex(event.y());
+        if (chatSelect$isInChatHistory(click.x(), click.y())) {
+            List<ChatHudLine.Visible> lines = ((ChatHudAccessor) MinecraftClient.getInstance().inGameHud.getChatHud())
+                    .chattextselect$getVisibleMessages();
+            int idx = chatSelect$screenYToVisibleIndex(click.y());
             if (idx >= 0 && idx < lines.size()) {
                 chatSelect$startIdx = idx;
                 chatSelect$endIdx = idx;
@@ -89,96 +75,85 @@ public abstract class ChatScreenMixin extends Screen {
         chatSelect$dragging = false;
     }
 
-    
-    
-    
-
     @Override
-    public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
-        if (chatSelect$dragging && event.button() == 0) {
-            List<GuiMessage.Line> lines = ((ChatComponentAccessor) Minecraft.getInstance().gui.getChat())
-                    .chattextselect$getTrimmedMessages();
-            int idx = chatSelect$screenYToTrimmedIndex(event.y());
-            chatSelect$endIdx = Mth.clamp(idx, 0, lines.size() - 1);
+    public boolean mouseDragged(Click click, double offsetX, double offsetY) {
+        if (chatSelect$dragging && click.button() == 0) {
+            List<ChatHudLine.Visible> lines = ((ChatHudAccessor) MinecraftClient.getInstance().inGameHud.getChatHud())
+                    .chattextselect$getVisibleMessages();
+            int idx = chatSelect$screenYToVisibleIndex(click.y());
+            chatSelect$endIdx = MathHelper.clamp(idx, 0, lines.size() - 1);
             return true;
         }
-        return super.mouseDragged(event, dx, dy);
+        return super.mouseDragged(click, offsetX, offsetY);
     }
-
-    
-    
-    
 
     @Override
-    public boolean mouseReleased(MouseButtonEvent event) {
-        if (event.button() == 0) {
+    public boolean mouseReleased(Click click) {
+        if (click.button() == 0) {
             chatSelect$dragging = false;
         }
-        return super.mouseReleased(event);
+        return super.mouseReleased(click);
     }
 
-    
-    
-    
-
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
-    private void chatSelect$onKeyPressed(KeyEvent event, CallbackInfoReturnable<Boolean> cir) {
-        if (event.key() != 67 || !event.hasControlDown()) return;
+    private void chatSelect$onKeyPressed(KeyInput input, CallbackInfoReturnable<Boolean> cir) {
+        if (!input.isCopy()) return;
         if (chatSelect$startIdx < 0 || chatSelect$endIdx < 0) return;
 
-        Minecraft mc = Minecraft.getInstance();
-        List<GuiMessage.Line> lines = ((ChatComponentAccessor) mc.gui.getChat())
-                .chattextselect$getTrimmedMessages();
-        if (lines.isEmpty()) return;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        ChatHudAccessor accessor = (ChatHudAccessor) mc.inGameHud.getChatHud();
+        List<ChatHudLine.Visible> visibleLines = accessor.chattextselect$getVisibleMessages();
+        if (visibleLines.isEmpty()) return;
 
-        int lo = Mth.clamp(Math.min(chatSelect$startIdx, chatSelect$endIdx), 0, lines.size() - 1);
-        int hi = Mth.clamp(Math.max(chatSelect$startIdx, chatSelect$endIdx), 0, lines.size() - 1);
+        int lo = MathHelper.clamp(Math.min(chatSelect$startIdx, chatSelect$endIdx), 0, visibleLines.size() - 1);
+        int hi = MathHelper.clamp(Math.max(chatSelect$startIdx, chatSelect$endIdx), 0, visibleLines.size() - 1);
 
-        
-        SequencedSet<GuiMessage> seen = new LinkedHashSet<>();
+        SequencedSet<Integer> seenTimes = new LinkedHashSet<>();
         for (int i = hi; i >= lo; i--) {
-            seen.add(lines.get(i).parent());
+            seenTimes.add(visibleLines.get(i).addedTime());
         }
 
+        List<ChatHudLine> messages = accessor.chattextselect$getMessages();
         List<String> parts = new ArrayList<>();
-        for (GuiMessage msg : seen) {
-            parts.add(msg.content().getString());
+        for (int time : seenTimes) {
+            for (ChatHudLine msg : messages) {
+                if (msg.creationTick() == time) {
+                    parts.add(msg.content().getString());
+                    break;
+                }
+            }
         }
 
-        mc.keyboardHandler.setClipboard(String.join("\n", parts));
+        mc.keyboard.setClipboard(String.join("\n", parts));
         cir.setReturnValue(true);
         cir.cancel();
     }
 
-    
-    
-    
-
-    @Inject(method = "extractRenderState", at = @At("TAIL"))
-    private void chatSelect$onRender(GuiGraphicsExtractor graphics, int mouseX, int mouseY,
-                                     float delta, CallbackInfo ci) {
+    @Inject(method = "render", at = @At("TAIL"))
+    private void chatSelect$onRender(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         if (chatSelect$startIdx < 0 || chatSelect$endIdx < 0) return;
 
-        Minecraft mc = Minecraft.getInstance();
-        ChatComponent chat = mc.gui.getChat();
-        List<GuiMessage.Line> lines = ((ChatComponentAccessor) chat).chattextselect$getTrimmedMessages();
+        MinecraftClient mc = MinecraftClient.getInstance();
+        ChatHud chat = mc.inGameHud.getChatHud();
+        ChatHudAccessor accessor = (ChatHudAccessor) chat;
+        List<ChatHudLine.Visible> lines = accessor.chattextselect$getVisibleMessages();
         if (lines.isEmpty()) return;
 
-        int scroll = ((ChatComponentAccessor) chat).chattextselect$getChatScrollbarPos();
-        float scale = (float) (double) mc.options.chatScale().get();
-        int entryHeight = (int) (9.0 * ((double) mc.options.chatLineSpacing().get() + 1.0));
-        int screenHeight = mc.getWindow().getGuiScaledHeight();
-        int chatBottomLocal = Mth.floor((screenHeight - 40) / scale);
-        int linesPerPage = chat.getLinesPerPage();
-        int maxWidth = Mth.ceil(ChatComponent.getWidth((Double) mc.options.chatWidth().get()) / scale);
+        int scroll = accessor.chattextselect$getScrolledLines();
+        float scale = ((Double) mc.options.getChatScale().getValue()).floatValue();
+        int entryHeight = (int) (9.0 * ((Double) mc.options.getChatLineSpacing().getValue() + 1.0));
+        int screenHeight = mc.getWindow().getScaledHeight();
+        int chatBottomLocal = MathHelper.floor((screenHeight - 40) / scale);
+        int linesPerPage = chat.getVisibleLineCount();
+        int maxWidth = MathHelper.ceil(ChatHud.getWidth((Double) mc.options.getChatWidth().getValue()) / scale);
 
         int lo = Math.min(chatSelect$startIdx, chatSelect$endIdx);
         int hi = Math.max(chatSelect$startIdx, chatSelect$endIdx);
-        int highlightColor = ARGB.color(100, 0, 120, 215);
+        int highlightColor = (100 << 24) | (120 << 8) | 215;
 
-        graphics.pose().pushMatrix();
-        graphics.pose().scale(scale, scale);
-        graphics.pose().translate(4.0f, 0.0f);
+        context.getMatrices().pushMatrix();
+        context.getMatrices().scale(scale, scale);
+        context.getMatrices().translate(4.0f, 0.0f);
 
         for (int tmIdx = lo; tmIdx <= hi; tmIdx++) {
             if (tmIdx < 0 || tmIdx >= lines.size()) continue;
@@ -186,9 +161,9 @@ public abstract class ChatScreenMixin extends Screen {
             if (displayIdx < 0 || displayIdx >= linesPerPage) continue;
             int entryBottom = chatBottomLocal - displayIdx * entryHeight;
             int entryTop = entryBottom - entryHeight;
-            graphics.fill(-4, entryTop, maxWidth + 8, entryBottom, highlightColor);
+            context.fill(-4, entryTop, maxWidth + 8, entryBottom, highlightColor);
         }
 
-        graphics.pose().popMatrix();
+        context.getMatrices().popMatrix();
     }
 }
