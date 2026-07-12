@@ -1,6 +1,7 @@
 package chat.text.select.mixin;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.ActiveTextCollector;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.ChatComponent;
 import net.minecraft.client.gui.screens.ChatScreen;
@@ -8,9 +9,11 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.chat.GuiMessage;
+import net.minecraft.network.chat.Style;
 import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -27,18 +30,12 @@ public abstract class ChatScreenMixin extends Screen {
 
     protected ChatScreenMixin() { super(null); }
 
-    
+    @Shadow private ChatComponent.DisplayMode displayMode;
+
     @Unique private int chatSelect$startIdx = -1;
-    
     @Unique private int chatSelect$endIdx = -1;
-    
     @Unique private boolean chatSelect$dragging = false;
 
-    
-    
-    
-
-    
     @Unique
     private int chatSelect$screenYToTrimmedIndex(double screenY) {
         Minecraft mc = Minecraft.getInstance();
@@ -53,7 +50,18 @@ public abstract class ChatScreenMixin extends Screen {
         return displayIdx + scroll;
     }
 
-    
+    @Unique
+    private Style chatSelect$clickableStyleAt(double screenX, double screenY) {
+        Minecraft mc = Minecraft.getInstance();
+        int screenHeight = mc.getWindow().getGuiScaledHeight();
+        ActiveTextCollector.ClickableStyleFinder finder =
+                new ActiveTextCollector.ClickableStyleFinder(getFont(), (int) screenX, (int) screenY)
+                        .includeInsertions(false);
+        mc.gui.getChat().captureClickableText(finder, screenHeight, mc.gui.getGuiTicks(), this.displayMode);
+        Style style = finder.result();
+        return (style != null && style.getClickEvent() != null) ? style : null;
+    }
+
     @Unique
     private boolean chatSelect$isInChatHistory(double screenX, double screenY) {
         Minecraft mc = Minecraft.getInstance();
@@ -64,14 +72,16 @@ public abstract class ChatScreenMixin extends Screen {
         return screenX >= 0 && screenX <= chatWidthScreen + 8;
     }
 
-    
-    
-    
-
     @Inject(method = "mouseClicked", at = @At("HEAD"))
     private void chatSelect$onMouseClicked(MouseButtonEvent event, boolean doubleClick,
                                            CallbackInfoReturnable<Boolean> cir) {
         if (event.button() != 0) return;
+        if (chatSelect$clickableStyleAt(event.x(), event.y()) != null) {
+            chatSelect$startIdx = -1;
+            chatSelect$endIdx = -1;
+            chatSelect$dragging = false;
+            return;
+        }
 
         if (chatSelect$isInChatHistory(event.x(), event.y())) {
             List<GuiMessage.Line> lines = ((ChatComponentAccessor) Minecraft.getInstance().gui.getChat())
@@ -89,10 +99,6 @@ public abstract class ChatScreenMixin extends Screen {
         chatSelect$dragging = false;
     }
 
-    
-    
-    
-
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
         if (chatSelect$dragging && event.button() == 0) {
@@ -105,10 +111,6 @@ public abstract class ChatScreenMixin extends Screen {
         return super.mouseDragged(event, dx, dy);
     }
 
-    
-    
-    
-
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
         if (event.button() == 0) {
@@ -116,10 +118,6 @@ public abstract class ChatScreenMixin extends Screen {
         }
         return super.mouseReleased(event);
     }
-
-    
-    
-    
 
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
     private void chatSelect$onKeyPressed(KeyEvent event, CallbackInfoReturnable<Boolean> cir) {
@@ -133,8 +131,6 @@ public abstract class ChatScreenMixin extends Screen {
 
         int lo = Mth.clamp(Math.min(chatSelect$startIdx, chatSelect$endIdx), 0, lines.size() - 1);
         int hi = Mth.clamp(Math.max(chatSelect$startIdx, chatSelect$endIdx), 0, lines.size() - 1);
-
-        
         SequencedSet<GuiMessage> seen = new LinkedHashSet<>();
         for (int i = hi; i >= lo; i--) {
             seen.add(lines.get(i).parent());
@@ -149,10 +145,6 @@ public abstract class ChatScreenMixin extends Screen {
         cir.setReturnValue(true);
         cir.cancel();
     }
-
-    
-    
-    
 
     @Inject(method = "extractRenderState", at = @At("TAIL"))
     private void chatSelect$onRender(GuiGraphicsExtractor graphics, int mouseX, int mouseY,
