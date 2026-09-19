@@ -31,6 +31,7 @@ public abstract class ChatScreenMixin extends Screen {
     @Unique private int chatSelect$startCharIdx = 0;
     @Unique private int chatSelect$endCharIdx = 0;
     @Unique private boolean chatSelect$dragging = false;
+    @Unique private static final int chatSelect$LEFT_BUTTON = 1;
     @Unique
     private record LineMetrics(List<Integer> codePoints, float[] cumulativeWidth) {
         int charCount() { return codePoints.size(); }
@@ -102,7 +103,7 @@ public abstract class ChatScreenMixin extends Screen {
     @Inject(method = "mouseClicked", at = @At("HEAD"))
     private void chatSelect$onMouseClicked(MouseButtonEvent event, boolean doubleClick,
                                            CallbackInfoReturnable<Boolean> cir) {
-        if (event.button() != 0) return;
+        if (event.button() != chatSelect$LEFT_BUTTON) return;
         if (chatSelect$clickableStyleAt(event.x(), event.y()) != null) {
             chatSelect$startIdx = -1;
             chatSelect$endIdx = -1;
@@ -130,7 +131,7 @@ public abstract class ChatScreenMixin extends Screen {
     }
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
-        if (chatSelect$dragging && event.button() == 0) {
+        if (chatSelect$dragging && event.button() == chatSelect$LEFT_BUTTON) {
             List<GuiMessage.Line> lines = ((ChatComponentAccessor) Minecraft.getInstance().gui.hud.getChat())
                     .chattextselect$getTrimmedMessages();
             if (lines.isEmpty()) return true;
@@ -144,14 +145,14 @@ public abstract class ChatScreenMixin extends Screen {
     }
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
-        if (event.button() == 0) {
+        if (event.button() == chatSelect$LEFT_BUTTON) {
             chatSelect$dragging = false;
         }
         return super.mouseReleased(event);
     }
     @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
     private void chatSelect$onKeyPressed(KeyEvent event, CallbackInfoReturnable<Boolean> cir) {
-        if (event.key() != 67 || !event.hasControlDown()) return;
+        if (!event.isCopy()) return;
         if (chatSelect$startIdx < 0 || chatSelect$endIdx < 0) return;
         Minecraft mc = Minecraft.getInstance();
         List<GuiMessage.Line> lines = ((ChatComponentAccessor) mc.gui.hud.getChat())
