@@ -9,10 +9,12 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.multiplayer.chat.GuiMessage;
+import net.minecraft.client.multiplayer.chat.GuiMessageTag;
 import net.minecraft.network.chat.Style;
 import net.minecraft.util.ARGB;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
+import org.joml.Matrix3x2f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -21,7 +23,10 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 @Mixin(ChatScreen.class)
 public abstract class ChatScreenMixin extends Screen {
     protected ChatScreenMixin() { super(null); }
@@ -76,9 +81,37 @@ public abstract class ChatScreenMixin extends Screen {
         return displayIdx + scroll;
     }
     @Unique
-    private double chatSelect$screenXToLocalX(double screenX) {
+    private double chatSelect$screenXToLocalX(double screenX, float lineX) {
         double scale = Minecraft.getInstance().options.chatScale().get();
-        return screenX / scale - 4.0;
+        return screenX / scale - lineX;
+    }
+    @Unique
+    private Map<FormattedCharSequence, Float> chatSelect$lineXs() {
+        Minecraft mc = Minecraft.getInstance();
+        Map<FormattedCharSequence, Float> result = new IdentityHashMap<>();
+        Matrix3x2f pose = new Matrix3x2f();
+        ChatComponent.ChatGraphicsAccess recorder = new ChatComponent.ChatGraphicsAccess() {
+            @Override
+            public void updatePose(Consumer<Matrix3x2f> modifier) { modifier.accept(pose); }
+            @Override
+            public void fill(int x0, int y0, int x1, int y1, int color) {}
+            @Override
+            public boolean handleMessage(int y, float opacity, FormattedCharSequence content) {
+                result.put(content, pose.m20() / pose.m00());
+                return false;
+            }
+            @Override
+            public void handleTag(int x0, int y0, int x1, int y1, float opacity, GuiMessageTag tag) {}
+            @Override
+            public void handleTagIcon(int x, int y, boolean hovered, GuiMessageTag tag, GuiMessageTag.Icon icon) {}
+        };
+        ((ChatComponentAccessor) mc.gui.hud.getChat()).chattextselect$extractRenderState(
+                recorder, mc.getWindow().getGuiScaledHeight(), mc.gui.hud.getGuiTicks(), this.displayMode);
+        return result;
+    }
+    @Unique
+    private static float chatSelect$lineX(Map<FormattedCharSequence, Float> lineXs, GuiMessage.Line line) {
+        return lineXs.getOrDefault(line.content(), 4.0f);
     }
     @Unique
     private Style chatSelect$clickableStyleAt(double screenX, double screenY) {
@@ -115,8 +148,10 @@ public abstract class ChatScreenMixin extends Screen {
                     .chattextselect$getTrimmedMessages();
             int idx = chatSelect$screenYToTrimmedIndex(event.y());
             if (idx >= 0 && idx < lines.size()) {
-                LineMetrics metrics = chatSelect$buildMetrics(lines.get(idx).content(), getFont());
-                int charIdx = chatSelect$charIndexAtX(metrics, chatSelect$screenXToLocalX(event.x()));
+                GuiMessage.Line line = lines.get(idx);
+                LineMetrics metrics = chatSelect$buildMetrics(line.content(), getFont());
+                float lineX = chatSelect$lineX(chatSelect$lineXs(), line);
+                int charIdx = chatSelect$charIndexAtX(metrics, chatSelect$screenXToLocalX(event.x(), lineX));
                 chatSelect$startIdx = idx;
                 chatSelect$endIdx = idx;
                 chatSelect$startCharIdx = charIdx;
@@ -136,9 +171,11 @@ public abstract class ChatScreenMixin extends Screen {
                     .chattextselect$getTrimmedMessages();
             if (lines.isEmpty()) return true;
             int idx = Mth.clamp(chatSelect$screenYToTrimmedIndex(event.y()), 0, lines.size() - 1);
-            LineMetrics metrics = chatSelect$buildMetrics(lines.get(idx).content(), getFont());
+            GuiMessage.Line line = lines.get(idx);
+            LineMetrics metrics = chatSelect$buildMetrics(line.content(), getFont());
+            float lineX = chatSelect$lineX(chatSelect$lineXs(), line);
             chatSelect$endIdx = idx;
-            chatSelect$endCharIdx = chatSelect$charIndexAtX(metrics, chatSelect$screenXToLocalX(event.x()));
+            chatSelect$endCharIdx = chatSelect$charIndexAtX(metrics, chatSelect$screenXToLocalX(event.x(), lineX));
             return true;
         }
         return super.mouseDragged(event, dx, dy);
@@ -211,32 +248,34 @@ public abstract class ChatScreenMixin extends Screen {
         }
         int highlightColor = ARGB.color(100, 0, 120, 215);
         Font font = getFont();
+        Map<FormattedCharSequence, Float> lineXs = chatSelect$lineXs();
         graphics.pose().pushMatrix();
         graphics.pose().scale(scale, scale);
-        graphics.pose().translate(4.0f, 0.0f);
         for (int tmIdx = lo; tmIdx <= hi; tmIdx++) {
             if (tmIdx < 0 || tmIdx >= lines.size()) continue;
             int displayIdx = tmIdx - scroll;
             if (displayIdx < 0 || displayIdx >= linesPerPage) continue;
             int entryBottom = chatBottomLocal - displayIdx * entryHeight;
             int entryTop = entryBottom - entryHeight;
+            GuiMessage.Line line = lines.get(tmIdx);
+            float lineX = chatSelect$lineX(lineXs, line);
             float xStart;
             float xEnd;
             if (hi == lo) {
-                LineMetrics metrics = chatSelect$buildMetrics(lines.get(tmIdx).content(), font);
-                xStart = metrics.widthTo(topChar);
-                xEnd = metrics.widthTo(bottomChar);
+                LineMetrics metrics = chatSelect$buildMetrics(line.content(), font);
+                xStart = lineX + metrics.widthTo(topChar);
+                xEnd = lineX + metrics.widthTo(bottomChar);
             } else if (tmIdx == hi) {
-                LineMetrics metrics = chatSelect$buildMetrics(lines.get(tmIdx).content(), font);
-                xStart = metrics.widthTo(topChar);
-                xEnd = maxWidth + 8;
+                LineMetrics metrics = chatSelect$buildMetrics(line.content(), font);
+                xStart = lineX + metrics.widthTo(topChar);
+                xEnd = maxWidth + 12;
             } else if (tmIdx == lo) {
-                LineMetrics metrics = chatSelect$buildMetrics(lines.get(tmIdx).content(), font);
-                xStart = -4;
-                xEnd = metrics.widthTo(bottomChar);
+                LineMetrics metrics = chatSelect$buildMetrics(line.content(), font);
+                xStart = 0;
+                xEnd = lineX + metrics.widthTo(bottomChar);
             } else {
-                xStart = -4;
-                xEnd = maxWidth + 8;
+                xStart = 0;
+                xEnd = maxWidth + 12;
             }
             graphics.fill((int) xStart, entryTop, (int) xEnd, entryBottom, highlightColor);
         }
